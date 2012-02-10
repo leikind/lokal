@@ -1,0 +1,19 @@
+fr:
+  email:
+    errors:
+      invalid: "Adresse email n'est pas valide"
+      already_used: Cet adresse email est déjà utilisée
+
+  newsletters:
+    manage_template: Gérer les templates
+    manage_bat: Gérer BAT
+
+    action:
+      generate_test: Générer un test
+      send_test: Envoyer le test
+
+    state:
+      created: Créée
+      generated_test: Test généré
+      sending_test: Envoi du test en cours
+

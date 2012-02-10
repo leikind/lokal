@@ -1,0 +1,160 @@
+= lokal
+
+Author::  Yuri Leikind
+
+
+A quick-n-dirty script I wrote to manipulate Rails locale files in multi-language projects.
+I did not want to just load two YAML files as a hash, merge them recursively and then dump the result of the merge,
+because I wanted to keep original comments and the line order.
+
+== Examples
+
+=== Input files
+
+app.en.yml:
+
+  en:
+    newsletters:
+      manage_template: Manage the templates templates
+      manage_bat: Manage BAT
+
+      state:
+        created: Create
+        generating_test: Generation of the test in progress
+        generated_test: Test generated
+        sending_test: Sending of the test in progress
+
+    club:
+      fields:
+        default_order_refunds: Order refunds by
+        default_order_contests: Order contests by
+        ensure_ssl_for_logged_in_users: Redirect autenticated users to HTTPS
+
+
+app.fr.yml:
+
+  fr:
+    email:
+      errors:
+        invalid: "Adresse email n'est pas valide"
+        already_used: Cet adresse email est déjà utilisée
+
+    newsletters:
+      manage_template: Gérer les templates
+      manage_bat: Gérer BAT
+
+      action:
+        generate_test: Générer un test
+        send_test: Envoyer le test
+
+      state:
+        created: Créée
+        generated_test: Test généré
+        sending_test: Envoi du test en cours
+
+=== Merging
+
+  $ ./lokal --enrich  app.en.yml app.fr.yml
+  en:
+    newsletters:
+      action:
+        # TO DO: verify translation of the new key 'newsletters.action.generate_test'
+        generate_test: Générer un test
+        # TO DO: verify translation of the new key 'newsletters.action.send_test'
+        send_test: Envoyer le test
+      manage_template: Manage the templates templates
+      manage_bat: Manage BAT
+
+      state:
+        created: Create
+        generating_test: Generation of the test in progress
+        generated_test: Test generated
+        sending_test: Sending of the test in progress
+
+    club:
+      fields:
+        default_order_refunds: Order refunds by
+        default_order_contests: Order contests by
+        ensure_ssl_for_logged_in_users: Redirect autenticated users to HTTPS
+    email:
+      errors:
+        # TO DO: verify translation of the new key 'email.errors.invalid'
+        invalid: Adresse email n'est pas valide
+        # TO DO: verify translation of the new key 'email.errors.already_used'
+        already_used: Cet adresse email est déjà utilisée
+
+
+  $ ./lokal --enrich  app.fr.yml app.en.yml
+  fr:
+    email:
+      errors:
+        invalid: "Adresse email n'est pas valide"
+        already_used: Cet adresse email est déjà utilisée
+
+    newsletters:
+      manage_template: Gérer les templates
+      manage_bat: Gérer BAT
+
+      action:
+        generate_test: Générer un test
+        send_test: Envoyer le test
+
+      state:
+        # TO DO: verify translation of the new key 'newsletters.state.generating_test'
+        generating_test: Generation of the test in progress
+        created: Créée
+        generated_test: Test généré
+        sending_test: Envoi du test en cours
+
+    club:
+      fields:
+        # TO DO: verify translation of the new key 'club.fields.default_order_refunds'
+        default_order_refunds: Order refunds by
+        # TO DO: verify translation of the new key 'club.fields.default_order_contests'
+        default_order_contests: Order contests by
+        # TO DO: verify translation of the new key 'club.fields.ensure_ssl_for_logged_in_users'
+        ensure_ssl_for_logged_in_users: Redirect autenticated users to HTTPS
+
+
+=== Comparing
+
+  $ ./lokal --compare  app.fr.yml app.en.yml
+  Missing in app.fr.yml, present in app.en.yml:
+    newsletters.state.generating_test:  Generation of the test in progress
+    club.fields.default_order_refunds:  Order refunds by
+    club.fields.default_order_contests:  Order contests by
+    club.fields.ensure_ssl_for_logged_in_users:  Redirect autenticated users to HTTPS
+  Missing in app.en.yml, present in app.fr.yml:
+    email.errors.invalid:  Adresse email n'est pas valide
+    email.errors.already_used:  Cet adresse email est déjà utilisée
+    newsletters.action.generate_test:  Générer un test
+    newsletters.action.send_test:  Envoyer le test
+
+=== Annotation
+
+  $ ./lokal --annotate  app.en.yml
+  en:
+    newsletters:
+      # newsletters.manage_template
+      manage_template: Manage the templates templates
+      # newsletters.manage_bat
+      manage_bat: Manage BAT
+
+      state:
+        # newsletters.state.created
+        created: Create
+        # newsletters.state.generating_test
+        generating_test: Generation of the test in progress
+        # newsletters.state.generated_test
+        generated_test: Test generated
+        # newsletters.state.sending_test
+        sending_test: Sending of the test in progress
+
+    club:
+      fields:
+        # club.fields.default_order_refunds
+        default_order_refunds: Order refunds by
+        # club.fields.default_order_contests
+        default_order_contests: Order contests by
+        # club.fields.ensure_ssl_for_logged_in_users
+        ensure_ssl_for_logged_in_users: Redirect autenticated users to HTTPS

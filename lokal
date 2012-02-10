@@ -1,0 +1,361 @@
+#!/usr/bin/env ruby
+# © Yuri Leikind
+
+require 'yaml'
+require 'set'
+
+def usage
+  puts DATA.read
+end
+
+
+# I am sorry, but GetoptLong is a piece of stinking junk,
+# and other alternatives are external dependencies, for such a small script ...
+case ARGV[0]
+when '--compare'
+  @compare = true
+when '--enrich'
+  @enrich = true
+when '--annotate'
+  @annotate = true
+else
+  usage
+  exit 4
+end
+
+
+if (@annotate && ARGV.size != 2) || (! @annotate && ARGV.size != 3)
+  usage
+  exit 3
+end
+
+
+class Path
+  attr_reader :chunks, :path
+
+  include Enumerable
+
+  def initialize path
+    @path, @chunks = if path.is_a? String
+      [path, path.split('.')]
+    elsif path.is_a? Array
+      [path.join('.'), path]
+    else
+      raise ArgumentError.new
+    end
+  end
+
+
+  def +(another)
+    another = Path.new(another) if another.is_a?(String)
+    Path.new(self.chunks + another.chunks)
+  end
+
+  alias_method :to_s, :path
+
+  def size
+    chunks.size
+  end
+
+  def head
+    Path.new(chunks[0])
+  end
+
+  def tail
+    Path.new(chunks[1..-1])
+  end
+
+  def inspect
+    "#<Path #{self}>"
+  end
+
+  def hash
+    path.hash
+  end
+
+  def eql?(another)
+    path.eql?(another.path)
+  end
+
+  def each
+    chunks.each{|ch| yield ch}
+  end
+
+end
+
+
+class Locales
+
+  include Enumerable
+
+  attr_reader :filepath
+
+  def initialize(filepath)
+
+    unless File.exists?(filepath) && File.readable?(filepath)
+      raise "cannot read #{filepath}"
+    end
+
+    @filepath = filepath
+    file  = File.open(filepath)
+
+    begin
+      @locales_with_top_level =  YAML.load(file)
+    rescue ArgumentError
+      raise "could not parse #{filepath} as YAML. Is it YAML?"
+    end
+
+    unless @locales_with_top_level.is_a?(Hash) && @locales_with_top_level.size == 1
+      raise "Rails locale files have one top node - the language key. #{filepath} has #{locales.size}. Is it a Rails locales file?"
+    end
+
+    @locales = @locales_with_top_level.to_a[0][1]
+  end
+
+
+  def value_for_path(path)
+    struct = @locales
+    path.each do |key|
+      struct = struct[key]
+    end
+    struct
+  end
+
+  def annotate(out)
+    previous_line = nil
+    super_naive_yaml_parser do |line, whitespace, whitespace_count, current_path|
+
+      if current_path && value_for_path(current_path).is_a?(String)
+        comment = "#{whitespace}# #{current_path}"
+        unless previous_line.chomp == comment
+          out.puts comment
+        end
+      end
+      out.print line
+      previous_line = line
+    end
+  end
+
+  def enrich_by(another, out)
+    missing_keys, _ = self.compare_by_keys(another)
+
+    leaves_to_attach = Hash.new
+
+    missing_keys.each do |missing_key|
+      matching, not_matching =  self.matching_not_matching_path(missing_key)
+
+      unless leaves_to_attach.has_key?(matching)
+        leaves_to_attach[matching] = []
+      end
+
+      leaves_to_attach[matching] << not_matching
+    end
+
+    leaves_to_attach_tree = {}
+    leaves_to_attach.each do |attach_to, attachables|
+      leaves_to_attach_tree[attach_to] = make_tree attachables
+    end
+
+    step = nil
+    super_naive_yaml_parser do |line, whitespace, whitespace_count, current_path|
+
+      out.print line
+      if current_path
+        if leaves_to_attach_tree[current_path] && current_path.size != 0
+          step ||= whitespace_count / current_path.size unless current_path.size == 0
+          insert whitespace, step, current_path, leaves_to_attach_tree[current_path], another, out
+          leaves_to_attach_tree.delete(current_path)
+        end
+      end
+    end
+    empty_path = Path.new('')
+    if leaves_to_attach_tree.has_key?(empty_path)
+      insert '', step, empty_path, leaves_to_attach_tree[empty_path], another, out
+    end
+
+  end
+
+
+  def compare_by_keys(another)
+    this_set = self.keys.to_set
+    that_set = another.keys.to_set
+
+    [(that_set - this_set).to_a, (this_set - that_set).to_a]
+  end
+
+
+  def keys
+    [].tap do |keys|
+      each do |path, _|
+        keys << path
+      end
+    end
+  end
+
+
+  def each
+    walk_hash(@locales)do |path, value|
+      yield path, value
+    end
+  end
+
+  protected
+
+  def matching_not_matching_path(path)
+    struct = @locales
+    chunks = path.chunks.clone
+    found = []
+    while struct.has_key?(chunks[0])
+      struct = struct[chunks[0]]
+      found << chunks.shift
+    end
+    [Path.new(found), Path.new(chunks)]
+  end
+
+  private
+
+
+  def make_tree(list_of_paths)
+    res = []
+    subtrees = {}
+    list_of_paths.each do |path|
+      if path.size == 1
+        res << path
+      else
+        head, tail = path.head, path.tail
+        unless subtrees.has_key?(head)
+          subtrees[head] = []
+        end
+        subtrees[head] << tail
+      end
+    end
+    subtrees.each do |key, subtree|
+      res << {key => make_tree(subtree)}
+    end
+    res
+  end
+
+
+  def super_naive_yaml_parser
+
+    current_prefixes = []
+
+    whitespaces_stack = [0]
+    whitespace_count = 0
+
+    File.open(filepath) do |f|
+      while line = f.gets
+        if line =~ /^(\s*)([^:]+)\s*:/
+          whitespace, key = $1, $2
+
+          if whitespace.size == whitespace_count
+            # level stays the same
+            current_prefixes.pop
+            current_prefixes << key
+          elsif whitespace.size > whitespace_count
+            # deeper level
+            whitespace_count = whitespace.size
+            whitespaces_stack << whitespace_count
+            current_prefixes << key
+          elsif whitespace.size < whitespace_count
+            # up
+            whitespace_count = whitespace.size
+            current_prefixes.pop
+            while whitespaces_stack[-1] != whitespace_count
+              whitespaces_stack.pop
+              current_prefixes.pop
+            end
+            current_prefixes << key
+          end
+
+          yield line, whitespace, whitespace_count, Path.new(current_prefixes[1..-1])
+
+        else
+          yield line, whitespace, whitespace_count, nil
+        end
+      end
+    end
+  end
+
+  def insert whitespace, step, current_path, leaves_to_attach, another, out
+    new_whitespace = whitespace + (' ' * step)
+    leaves_to_attach.each do |leave|
+
+      if leave.is_a?(Path)
+        complete_path  = current_path + leave
+        out.puts new_whitespace + "# TO DO: verify translation of the new key '#{complete_path}'"
+        out.puts new_whitespace + leave.to_s + ': ' + another.value_for_path(complete_path)
+      elsif leave.is_a?(Hash)
+        key = leave.keys[0]
+        out.puts new_whitespace + key.to_s + ':'
+        insert new_whitespace , step, current_path + key, leave[key], another, out
+      end
+    end
+  end
+
+
+  def walk_hash(hash, prefix = '')
+    hash.each do |key, value|
+      path = prefix + key
+      if value.is_a?(Hash)
+        walk_hash(value,  path + '.') do |_path, _value|
+          yield _path, _value
+        end
+      else
+        yield Path.new(path), value
+      end
+    end
+  end
+end
+
+
+def report locales1, locales2, missing_in_1
+  if missing_in_1.empty?
+    puts "All keys of #{locales2.filepath} are present in #{locales1.filepath}"
+  else
+    puts "Missing in #{locales1.filepath}, present in #{locales2.filepath}:"
+
+    missing_in_1.each do |missing_key|
+      puts "  #{missing_key}:  " + locales2.value_for_path(missing_key)
+    end
+  end
+end
+
+locales1 = Locales.new(ARGV[1])
+
+if @compare
+  locales2 = Locales.new(ARGV[2])
+  missing_in_1, missing_in_2 = locales1.compare_by_keys(locales2)
+
+  if missing_in_1.empty? && missing_in_2.empty?
+    puts 'Sets of keys in the two files are identical'
+    exit 0
+  end
+
+  report locales1, locales2, missing_in_1
+  report locales2, locales1, missing_in_2
+
+elsif @enrich
+  locales2 = Locales.new(ARGV[2])
+  locales1.enrich_by(locales2, STDOUT)
+elsif @annotate
+  locales1.annotate(STDOUT)
+end
+
+__END__
+A simple tool to manipulate Rails locale files. The main point is to keep the original file with its comments and its original order, that is, not just loading two YAML files as a hash, merging them recursively and then dumping the result of the merge.
+
+
+Usage:
+
+  lokal --enrich file1.yml file2.yml
+
+Outputs file1.yml to STDOUT inserting those key/value pairs from file2.yml which are not present in file1.yml. All comments and the order of lines is retained. Missing keys will be attached to correct fragments of the hierarchy. Each inserted key/value pair is preceded by a comment line with a TODO.
+
+  lokal --compare file1.yml file2.yml
+
+Shows key/value pairs present in file1 and absent in file2, and key/value pairs present in file2 and absent in file1.
+
+  lokal --annotate file.yml
+
+Adds a comment with the complete key. Useful for locale files with many levels (admin.users.fields.firstname). Comments are not inserted if they are already present in the file.

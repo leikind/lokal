@@ -1,0 +1,16 @@
+en:
+  newsletters:
+    manage_template: Manage the templates templates
+    manage_bat: Manage BAT
+
+    state:
+      created: Create
+      generating_test: Generation of the test in progress
+      generated_test: Test generated
+      sending_test: Sending of the test in progress
+
+  club:
+    fields:
+      default_order_refunds: Order refunds by
+      default_order_contests: Order contests by
+      ensure_ssl_for_logged_in_users: Redirect autenticated users to HTTPS
